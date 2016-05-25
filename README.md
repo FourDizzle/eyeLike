@@ -1,5 +1,5 @@
 ##eyeLike
-An OpenCV based webcam gaze tracker based on a simple image gradient-based eye center algorithm by Fabian Timm and the C++ implementation at trishume/eyeLike by Tristan Hume. 
+An OpenCV based webcam gaze tracker based on a simple image gradient-based eye center [algorithm](http://www.inb.uni-luebeck.de/fileadmin/files/PUBPDFS/TiBa11b.pdf) by Fabian Timm and Erhardt Barth and the C++ implementation at [trishume/eyeLike](https://github.com/trishume/eyeLike) by Tristan Hume. 
 
 ##DISCLAIMER
 This is not fully finished yet. Let me know if you're interested in helping.
