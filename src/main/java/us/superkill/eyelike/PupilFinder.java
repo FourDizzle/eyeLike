@@ -3,8 +3,10 @@ package us.superkill.eyelike;
 import static org.bytedeco.javacpp.opencv_core.CV_64F;
 import static org.bytedeco.javacpp.opencv_core.minMaxLoc;
 import static org.bytedeco.javacpp.opencv_core.split;
+import static org.bytedeco.javacpp.opencv_imgcodecs.imwrite;
 import static org.bytedeco.javacpp.opencv_imgproc.GaussianBlur;
 import static org.bytedeco.javacpp.opencv_imgproc.resize;
+import static org.bytedeco.javacpp.opencv_imgproc.*;
 import static us.superkill.eyelike.DetectConfig.kEnableWeight;
 import static us.superkill.eyelike.DetectConfig.kFastEyeWidth;
 import static us.superkill.eyelike.DetectConfig.kGradientThreshold;
@@ -20,6 +22,7 @@ import org.bytedeco.javacpp.opencv_core.MatVector;
 import org.bytedeco.javacpp.opencv_core.Point;
 import org.bytedeco.javacpp.opencv_core.Rect;
 import org.bytedeco.javacpp.opencv_core.Size;
+import org.bytedeco.javacpp.indexer.*;
 
 public class PupilFinder {
 	
@@ -41,19 +44,30 @@ public class PupilFinder {
 	}
 	
 	private static Mat computeMatXGradient(Mat mat) {
+		mat.convertTo(mat, CV_64F);
 		Mat output = new Mat(mat.rows(), mat.cols(), CV_64F);
+		DoubleIndexer outIndex = output.createIndexer();
+		DoubleIndexer matIndex = mat.createIndexer();
 		for(int y = 0; y < mat.rows(); y++) {
-			output.ptr(y,0).put((byte)(mat.ptr(y,1).get() - mat.ptr(y,0).get()));
+			double a = matIndex.get(y,1) - matIndex.get(y,0);
+//			double a = mat.ptr(y,1).get() - mat.ptr(y,0).get();
+			outIndex.put(y, 0, a);
+//			output.ptr(y,0).put((byte)(mat.ptr(y,1).get() - mat.ptr(y,0).get()));
 			for(int x = 1; x < mat.cols() - 1; x++) {
-				output.ptr(y,x).put((byte)((mat.ptr(y,x+1).get() - mat.ptr(y,x-1).get())/2.0));
+				double b = (matIndex.get(y,x+1) - matIndex.get(y,x-1))/2.0;
+				outIndex.put(y, x, b);
+//				output.ptr(y,x).put((byte)((mat.ptr(y,x+1).get() - mat.ptr(y,x-1).get())/2.0));
 			}
 		}
+		imwrite("Users/ncassiani/Projects/MeanMachine/testimg/xgrad.jpg", output);
 		return output;
 	}
 	
 	private static Mat testPossibleCentersFormula(
 			int x, int y, Mat weight, double gx, double gy, Mat out) {
 		//for all possible centers
+		DoubleIndexer weightIndex = weight.createIndexer();
+		DoubleIndexer outIndex = out.createIndexer();
 		for (int cy = 0; cy < out.rows(); cy++) {
 			for (int cx = 0; cx < out.cols(); cx++) {
 				if ((x == cx && y == cy) == false) {
@@ -69,13 +83,18 @@ public class PupilFinder {
 					dotProduct = Math.max(0.0, dotProduct);
 					//square and multiply by the weight
 					if (kEnableWeight) {
-						out.ptr(cy, cx).put((byte)
-								(out.ptr(cy, cx).get()
-									+ dotProduct * dotProduct
-									* (weight.ptr(cy, cx).get()/kWeightDivisor)));
+						outIndex.put(cy, cx, outIndex.get(cy,cx) 
+								+ dotProduct * dotProduct 
+								* (weightIndex.get(cy, cx)/kWeightDivisor));
+//						out.ptr(cy, cx).put((byte)
+//								(out.ptr(cy, cx).get()
+//									+ dotProduct * dotProduct
+//									* (weight.ptr(cy, cx).get()/kWeightDivisor)));
 					} else {
-						out.ptr(cy, cx).put((byte) 
-								(out.ptr(cy, cx).get() + dotProduct * dotProduct));
+						outIndex.put(cy, cx, outIndex.get(cy,cx) 
+								+ dotProduct * dotProduct);
+//						out.ptr(cy, cx).put((byte) 
+//								(out.ptr(cy, cx).get() + dotProduct * dotProduct));
 					}
 				}
 			}
@@ -86,13 +105,14 @@ public class PupilFinder {
 	public static Point findEyeCenter(Mat face, Rect eye) {
 		Mat eyeROIUnscaled = new Mat(face, eye);
 		Mat eyeROI = scaleToFastSize(eyeROIUnscaled);
+
+		imwrite("/Users/ncassiani/Projects/MeanMachine/testimg/eye.jpg", eyeROI);
 		
 		//Convert to grayscale
-		MatVector rgbChannels = new MatVector();
-		split(eyeROI, rgbChannels);
-		eyeROI = rgbChannels.get(2);
-//		Imgproc.cvtColor(eyeROI, eyeROI, Imgproc.COLOR_RGB2GRAY);
-		
+//		MatVector rgbChannels = new MatVector();
+//		split(eyeROI, rgbChannels);
+//		eyeROI = rgbChannels.get(2);
+		cvtColor(eyeROI, eyeROI, COLOR_RGB2GRAY);
 		//Find the gradient
 		Mat gradientX = computeMatXGradient(eyeROI);
 		Mat gradientY = computeMatXGradient(eyeROI.t().asMat()).t().asMat();
@@ -106,17 +126,22 @@ public class PupilFinder {
 				computeDynamicThreshold(mags, kGradientThreshold);
 		
 		//normalize
+		DoubleIndexer gradXIndex = gradientX.createIndexer();
+		DoubleIndexer gradYIndex = gradientY.createIndexer();
+		DoubleIndexer magIndex = mags.createIndexer();
 		for (int y = 0; y < eyeROI.rows(); ++y) {
 			for(int x = 0; x < eyeROI.cols(); ++x) {
-				double gX = gradientX.ptr(y, x).get();
-				double gY = gradientY.ptr(y, x).get();
-				double magnitude = mags.ptr(y, x).get();
+				long[] p = new long[] {y, x};
+//				double gX = gradXIndex.getDouble(p);
+				double gX = gradXIndex.get(y, x);
+				double gY = gradYIndex.get(y, x);
+				double magnitude = magIndex.get(y, x);
 				if (magnitude > gradientThresh) {
-					gradientX.ptr(y, x).put((byte) (gX/magnitude));
-					gradientY.ptr(y, x).put((byte) (gY/magnitude));
+					gradXIndex.put(y, x, gX/magnitude);
+					gradYIndex.put(y, x, gY/magnitude);
 				} else {
-					gradientX.ptr(y, x).put((byte) 0.0);
-					gradientY.ptr(y, x).put((byte) 0.0);
+					gradXIndex.put(y, x, 0.0);
+					gradYIndex.put(y, x, 0.0);
 				}
 			}
 		}
@@ -125,9 +150,11 @@ public class PupilFinder {
 		Mat weight = new Mat();
 		GaussianBlur(eyeROI, 
 				weight, new Size(kWeightBlurSize, kWeightBlurSize), 0.0);
+		DoubleIndexer weightIndex = weight.createIndexer();
 		for (int y = 0; y < weight.rows(); y++) {
 			for (int x = 0; x < weight.cols(); x++) {
-				weight.ptr(y, x).put((byte)(255 - weight.ptr(y, x).get()));
+				weightIndex.put(y, x, 255 - weightIndex.get(y, x));
+//				weight.ptr(y, x).put((byte)(255 - weight.ptr(y, x).get()));
 			}
 		}
 		
@@ -140,8 +167,8 @@ public class PupilFinder {
 		log.debug("Eye Size: " + outSum.rows() + "x" + outSum.cols());
 		for (int y = 0; y < weight.rows(); y++) {
 			for (int x = 0; x < weight.cols(); x++) {
-				double gX = gradientX.ptr(y, x).get();
-				double gY = gradientY.ptr(y, x).get();
+				double gX = gradXIndex.get(y, x);
+				double gY = gradYIndex.get(y, x);
 				if ((gX == 0.0 && gY == 0.0) == false) {
 					outSum = testPossibleCentersFormula(
 							x, y, weight, gX, gY, outSum);
@@ -153,15 +180,22 @@ public class PupilFinder {
 		double numGradients = (weight.rows()*weight.cols());
 		Mat out = new Mat();
 		outSum.convertTo(out, CV_64F, 1.0/numGradients, 0.0);
-		
+		imwrite("/Users/ncassiani/Projects/MeanMachine/testimg/out.jpg", out);
 		// find the maximum point
 //		MinMaxLocResult outMinMaxLocResult = Core.minMaxLoc(out);
-		Point minLoc = new Point();
+		Point minLoc = new Point(100, 200);
 		Point maxLoc = new Point();
 		double[] minVal = {0.0};
 		double[] maxVal = {0.0};
 		Mat mask = new Mat(out.size());
-		minMaxLoc(out, minVal, maxVal, minLoc, maxLoc, null);
+		minMaxLoc(out, null, maxVal, null, maxLoc, null);
+		int x = maxLoc.x();
+		int y = maxLoc.y();
+		int minx = minLoc.x();
+		int miny = minLoc.y();
+//		int[] minP = {0 ,0};
+//		int[] maxP = {0 ,0};
+//		minMaxLoc(out, minVal, maxVal, minP, maxP);
 //		Point maxP = outMinMaxLocResult.maxLoc;
 //		double maxVal = outMinMaxLocResult.maxVal;
 		
